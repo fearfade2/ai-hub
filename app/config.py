@@ -38,6 +38,9 @@ RESET_HOUR_UTC = int_env("HUB_RESET_HOUR_UTC", 3)
 DEFAULT_DAILY_REQUESTS = int_env("HUB_DEFAULT_DAILY_REQUESTS", 300)
 DEFAULT_DAILY_USD = float(env("HUB_DEFAULT_DAILY_USD", "2.0") or 0)
 
+def upstream_public() -> str:
+    """The HTTPS base under which /v1 is reachable from the internet."""
+    return (os.getenv("HUB_PUBLIC_URL") or "").rstrip("/")
 MAX_OUTPUT_TOKENS = int_env("HUB_MAX_OUTPUT_TOKENS", 4096)
 MAX_CONTEXT_MESSAGES = int_env("HUB_MAX_CONTEXT_MESSAGES", 40)
 

@@ -323,10 +323,10 @@ class Bot:
                                     self.keyboard_for("start", user_row))
             elif command in {"/start", "/help", "/profile", "/models", "/key",
                              "/quota", "/usage", "/docs", "/reset"}:
-                action = {"start": "start", "help": "help", "profile": "profile",
-                          "models": "models", "key": "key", "usage": "quota",
-                          "quota": "quota", "docs": "docs",
-                          "reset": "reset"}[command]
+                action = {"/start": "start", "/help": "help", "/profile": "profile",
+                          "/models": "models", "/key": "key", "/usage": "quota",
+                          "/quota": "quota", "/docs": "docs",
+                          "/reset": "reset"}[command]
                 text_body, user_row = await self.render_action(action, user)
                 await self.send(chat_id, text_body,
                                 self.keyboard_for(action, user_row))
@@ -358,7 +358,10 @@ class Bot:
                         await self.dispatch_callback(update["callback_query"])
                     else:
                         await self.dispatch(update.get("message") or {})
-            except ConnectionError:
+            except ConnectionError as error:
+                print("bot: connection error:", error, flush=True)
                 await asyncio.sleep(3)
             except Exception:
+                import traceback
+                traceback.print_exc()
                 await asyncio.sleep(5)

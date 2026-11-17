@@ -15,13 +15,6 @@ from .store import Store
 from .upstream import Upstream
 
 
-def public_url() -> str:
-    """The HTTPS base under which /v1 is reachable from the internet."""
-    return (os.getenv("HUB_PUBLIC_URL") or "").rstrip("/")
-
-
-config.upstream_public = public_url
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

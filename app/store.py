@@ -182,6 +182,16 @@ class Store:
                 " FROM usage WHERE key_id=? AND day=?", (key_id, day)).fetchone()
         return dict(row)
 
+
+    def today_by_model(self, key_id: int, limit: int = 3) -> list[dict]:
+        day = billing_day()
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT model, SUM(requests) requests, SUM(usd) usd FROM usage"
+                " WHERE key_id=? AND day=? GROUP BY model"
+                " ORDER BY usd DESC, requests DESC LIMIT ?",
+                (key_id, day, max(1, int(limit)))).fetchall()
+        return [dict(row) for row in rows]
     def reset_in_seconds(self, now: float | None = None) -> int:
         """Seconds until the next RESET_HOUR_UTC boundary."""
         import calendar

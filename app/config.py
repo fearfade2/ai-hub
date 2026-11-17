@@ -41,6 +41,8 @@ DEFAULT_DAILY_USD = float(env("HUB_DEFAULT_DAILY_USD", "2.0") or 0)
 def upstream_public() -> str:
     """The HTTPS base under which /v1 is reachable from the internet."""
     return (os.getenv("HUB_PUBLIC_URL") or "").rstrip("/")
+
+BANNER_FILE = Path(__file__).with_name("banner.png")
 MAX_OUTPUT_TOKENS = int_env("HUB_MAX_OUTPUT_TOKENS", 4096)
 MAX_CONTEXT_MESSAGES = int_env("HUB_MAX_CONTEXT_MESSAGES", 40)
 

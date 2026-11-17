@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 
 import httpx
 
@@ -15,8 +16,6 @@ def _btn(text: str, data: str) -> dict:
     return {"text": text, "callback_data": data}
 
 
-MENU_ACTIONS = {"start", "help", "models", "profile", "key", "reissue",
-               "quota", "docs", "reset"}
 
 
 class Bot:
@@ -24,14 +23,22 @@ class Bot:
         self.store = store
         self.upstream = upstream
         self.offset = 0
+        self.banner = config.BANNER_FILE.read_bytes()
 
     # -- transport -----------------------------------------------------------
-    async def api(self, method: str, payload: dict | None = None) -> dict:
+    async def api(self, method: str, payload: dict | None = None,
+                  files: dict | None = None) -> dict:
         try:
             async with httpx.AsyncClient(base_url=config.BOT_API_BASE,
                                          timeout=40) as client:
-                response = await client.post(
-                    f"/bot{config.BOT_TOKEN}/{method}", json=payload or {})
+                if files:
+                    response = await client.post(
+                        f"/bot{config.BOT_TOKEN}/{method}",
+                        data=payload or {}, files=files)
+                else:
+                    response = await client.post(
+                        f"/bot{config.BOT_TOKEN}/{method}",
+                        json=payload or {})
                 data = response.json()
                 if not data.get("ok"):
                     raise RuntimeError(data.get("description", "Telegram error"))
@@ -39,21 +46,37 @@ class Bot:
         except (httpx.HTTPError, ValueError) as error:
             raise ConnectionError(f"Telegram API: {error}") from error
 
-    async def send(self, chat_id: int, text: str, keyboard: dict | None = None):
-        payload = {"chat_id": chat_id, "text": text[:4000], "parse_mode": "HTML",
-                   "disable_web_page_preview": True}
+    @staticmethod
+    def _caption(text: str) -> str:
+        if len(text.encode("utf-16-le")) // 2 > 1024:
+            raise ValueError("Telegram photo caption exceeds 1024 UTF-16 units")
+        return text
+
+    async def send_screen(self, chat_id: int, text: str,
+                          keyboard: dict | None = None):
+        payload = {"chat_id": chat_id, "caption": self._caption(text),
+                   "parse_mode": "HTML"}
+        if keyboard:
+            payload["reply_markup"] = json.dumps(keyboard, ensure_ascii=False)
+        return await self.api("sendPhoto", payload,
+                              files={"photo": (config.BANNER_FILE.name,
+                                               self.banner, "image/png")})
+
+    async def edit_screen(self, chat_id: int, message_id: int, text: str,
+                          keyboard: dict | None = None):
+        payload = {"chat_id": chat_id, "message_id": message_id,
+                   "caption": self._caption(text), "parse_mode": "HTML"}
+        if keyboard:
+            payload["reply_markup"] = keyboard
+        return await self.api("editMessageCaption", payload)
+
+    async def send(self, chat_id: int, text: str,
+                   keyboard: dict | None = None):
+        payload = {"chat_id": chat_id, "text": text[:4000],
+                   "parse_mode": "HTML", "disable_web_page_preview": True}
         if keyboard:
             payload["reply_markup"] = keyboard
         return await self.api("sendMessage", payload)
-
-    async def edit(self, chat_id: int, message_id: int, text: str,
-                   keyboard: dict | None = None):
-        payload = {"chat_id": chat_id, "message_id": message_id,
-                   "text": text[:4000], "parse_mode": "HTML",
-                   "disable_web_page_preview": True}
-        if keyboard:
-            payload["reply_markup"] = keyboard
-        return await self.api("editMessageText", payload)
 
     async def answer(self, callback_query_id: str) -> None:
         try:
@@ -69,13 +92,13 @@ class Bot:
             [_btn("🔑 API-ключ", "key"), _btn("📊 Использование", "quota")],
             [_btn("📚 Как подключить", "docs"), _btn("ℹ️ Помощь", "help")],
         ]
-        if action == "key" and self.store.active_key(user_row["telegram_id"]):
+        if action in {"key", "reissue"} and self.store.active_key(user_row["telegram_id"]):
             rows.append([_btn("🔄 Перевыпустить ключ", "reissue")])
         return {"inline_keyboard": rows}
 
     # -- screens -----------------------------------------------------------------
     async def start_text(self) -> str:
-        base = config.upstream_public()
+        base = html.escape(config.upstream_public())
         return ("🤖 <b>AI Hub</b> — доступ к моделям в Telegram и по API.\n\n"
                 "Выбери раздел кнопками ниже, или просто напиши сообщение — "
                 "отвечу выбранной моделью.\n\n"
@@ -86,15 +109,20 @@ class Bot:
         models = await self.upstream.models()
         if not models:
             return ("⚠️ Список моделей недоступен.\n"
-                    "Попробуй позже или выбери модель командой /model <имя>.")
+                    "Попробуй позже или выбери модель командой /model &lt;имя&gt;.")
         current = user_row["chat_model"]
         names = [model["id"] for model in models][:48]
         lines = ["🤖 <b>Доступные модели</b>\n"]
         for name in names:
-            mark = "✅ " if name == current else "• "
-            lines.append(f"{mark}<code>{html.escape(name)}</code>")
-        lines.append("\nВыбрать: /model <имя>")
-        return "\n".join(lines)[:4000]
+            line = f"{'✅ ' if name == current else '• '}<code>{html.escape(name)}</code>"
+            if len(("\n".join((*lines, line)) + "\n\nВыбрать: /model &lt;имя&gt;").encode("utf-16-le")) // 2 > 900:
+                break
+            lines.append(line)
+        shown = len(lines) - 1
+        if shown < len(names):
+            lines.append(f"\nПоказано {shown} из {len(names)}. Полный список: /v1/models")
+        lines.append("\nВыбрать: /model &lt;имя&gt;")
+        return "\n".join(lines)
 
     def profile_text(self, user_row) -> str:
         key = self.store.active_key(user_row["telegram_id"])
@@ -125,7 +153,7 @@ class Bot:
                     totals["pt"], totals["ct"]).replace(",", " "),
             ]
             joined = ", ".join(
-                f"<code>{html.escape(item['model'])}</code> (${item['usd']:.4f})"
+                f"<code>{html.escape(item['model'][:80])}</code> (${item['usd']:.4f})"
                 for item in top if item["usd"] > 0)
             if joined:
                 lines.append(f"Топ моделей: {joined}")
@@ -154,27 +182,25 @@ class Bot:
         return self._key_issued_text(secret, prefix)
 
     def _key_issued_text(self, secret: str, prefix: str) -> str:
-        base = config.upstream_public()
+        base = html.escape(config.upstream_public())
         return ("🔑 <b>Ваш API-ключ</b> (префикс "
                 f"<code>{html.escape(prefix)}…</code>)\n\n"
                 f"<code>{html.escape(secret)}</code>\n\n"
                 "⚠️ Сохрани сейчас: показываю один раз, хранится хеш.\n\n"
                 f"🌐 Эндпоинт: <code>{base}/v1</code>\n"
-                "Заголовок: <code>Authorization: Bearer <ключ></code>")
+                "Заголовок: <code>Authorization: Bearer &lt;ключ&gt;</code>")
 
     def docs_text(self) -> str:
-        base = config.upstream_public()
+        base = html.escape(config.upstream_public())
         return ("📚 <b>Как подключить</b>\n\n"
                 "1. Выпусти ключ: раздел 🔑 API-ключ.\n"
                 f"2. Base URL: <code>{base}/v1</code>\n"
-                "3. Заголовок: <code>Authorization: Bearer <ключ></code>\n"
-                "4. Эндпоинты: <code>POST /chat/completions</code>, "
-                "<code>GET /models</code>\n\n"
+                "3. Заголовок: <code>Authorization: Bearer &lt;ключ&gt;</code>\n"
+                "4. Эндпоинты: <code>POST /chat/completions</code>, <code>GET /models</code>\n\n"
                 "Пример:\n"
-                f"<code>curl {base}/v1/chat/completions \\\n"
-                "  -H \"Authorization: Bearer hub_...\" \\\n"
-                "  -d '{\"model\": \"glm-5.3-flash\", "
-                "\"messages\": [{\"role\": \"user\", \"content\": \"привет\"}]}'</code>\n\n"
+                f"curl {base}/v1/chat/completions -H \"Authorization: Bearer hub_...\" "
+                "-d '{\"model\": \"glm-5.3-flash\", \"messages\": [{\"role\": \"user\", "
+                "\"content\": \"привет\"}]}'\n\n"
                 "Работает с OpenAI SDK, Cursor, Claude Code.")
 
     def reset_text(self) -> str:
@@ -274,14 +300,14 @@ class Bot:
         await self.answer(query["id"])
         try:
             text, user_row = await self.render_action(action, user)
+            keyboard = self.keyboard_for(action, user_row)
             try:
-                await self.edit(chat_id, message_id, text,
-                                self.keyboard_for(action, user_row))
-            except RuntimeError:
-                # "message is not modified" or edit failure: fall back to a send.
-                await self.send(chat_id, text, self.keyboard_for(action, user_row))
-        except (ConnectionError, RuntimeError):
-            pass
+                await self.edit_screen(chat_id, message_id, text, keyboard)
+            except RuntimeError as error:
+                if "message is not modified" not in str(error).lower():
+                    await self.send_screen(chat_id, text, keyboard)
+        except (ConnectionError, RuntimeError) as error:
+            print("bot: menu callback failed:", error, flush=True)
 
     async def dispatch(self, message: dict) -> None:
         chat_id = (message.get("chat") or {}).get("id")
@@ -299,28 +325,28 @@ class Bot:
                     user["id"], user.get("username", ""))
                 if argument:
                     self.store.set_chat_model(user["id"], argument)
-                    await self.send(
+                    await self.send_screen(
                         chat_id,
-                        f"✅ Модель чата: <code>{html.escape(argument)}</code>",
+                        f"✅ Модель чата: <code>{html.escape(argument[:80])}</code>",
                         self.keyboard_for("start", user_row))
                 else:
-                    await self.send(
+                    await self.send_screen(
                         chat_id,
                         "Текущая модель: "
                         f"<code>{html.escape(user_row['chat_model'] or 'не выбрана')}</code>.\n"
-                        "Выбор: /model <имя> из /models.",
+                        "Выбор: /model &lt;имя&gt; из /models.",
                         self.keyboard_for("start", user_row))
             elif command == "/revoke":
                 user_row = self.store.ensure_user(user["id"], user.get("username", ""))
                 existing = self.store.active_key(user["id"])
                 if existing:
                     self.store.revoke_by_prefix(existing["prefix"])
-                    await self.send(chat_id,
-                                    "🗑 Ключ отозван. Новый — раздел 🔑 API-ключ.",
-                                    self.keyboard_for("start", user_row))
+                    await self.send_screen(chat_id,
+                                           "🗑 Ключ отозван. Новый — раздел 🔑 API-ключ.",
+                                           self.keyboard_for("start", user_row))
                 else:
-                    await self.send(chat_id, "Активного ключа нет.",
-                                    self.keyboard_for("start", user_row))
+                    await self.send_screen(chat_id, "Активного ключа нет.",
+                                           self.keyboard_for("start", user_row))
             elif command in {"/start", "/help", "/profile", "/models", "/key",
                              "/quota", "/usage", "/docs", "/reset"}:
                 action = {"/start": "start", "/help": "help", "/profile": "profile",
@@ -328,16 +354,17 @@ class Bot:
                           "/quota": "quota", "/docs": "docs",
                           "/reset": "reset"}[command]
                 text_body, user_row = await self.render_action(action, user)
-                await self.send(chat_id, text_body,
-                                self.keyboard_for(action, user_row))
+                await self.send_screen(chat_id, text_body,
+                                       self.keyboard_for(action, user_row))
             elif command:
                 user_row = self.store.ensure_user(
                     user["id"], user.get("username", ""))
-                await self.send(chat_id, "🤷 Неизвестная команда. Меню ниже:",
-                                self.keyboard_for("start", user_row))
+                await self.send_screen(chat_id, "🤷 Неизвестная команда. Меню ниже:",
+                                       self.keyboard_for("start", user_row))
             else:
                 await self.handle_message(chat_id, user, text)
         except (ConnectionError, RuntimeError) as error:
+            print("bot: dispatch failed:", error, flush=True)
             try:
                 await self.send(chat_id, f"⚠️ Ошибка: {type(error).__name__}")
             except (ConnectionError, RuntimeError):

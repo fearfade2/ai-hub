@@ -7,7 +7,8 @@
 
 - **Бот в Telegram** [@VibeComAI_bot](https://t.me/VibeComAI_bot): чат с любой моделью
   апстрима, выбор модели, выдача/отзыв личного API-ключа, просмотр остатка квоты.
-  Bot API long polling, без вебхуков.
+  Во всех разделах меню используется одна иллюстрация-баннер; кнопки меняют
+  подпись к фото в том же сообщении. Bot API long polling, без вебхуков.
 - **API-шлюз** `/v1/models`, `/v1/chat/completions` (обычный и streaming) —
   совместим с OpenAI SDK и Claude Code: подставь свой эндпоинт и выданный ключ.
   Эндпоинт: `https://8791-agq2pkibmx77e7svypqdtkt2je.instabox.tech/v1`

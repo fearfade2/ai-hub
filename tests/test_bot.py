@@ -1,0 +1,71 @@
+import asyncio
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+from app.bot import Bot
+from app.store import Store
+
+
+class BotBannerTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.tmp.name) / "hub.sqlite")
+        self.upstream = SimpleNamespace(models=AsyncMock(return_value=[
+            {"id": "glm-5.3-flash"}, {"id": "test-model"}]))
+        self.bot = Bot(self.store, self.upstream)
+        self.bot.api = AsyncMock(return_value={"message_id": 42})
+
+    async def asyncTearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    async def test_start_sends_banner_and_menu_keyboard(self):
+        await self.bot.dispatch({
+            "chat": {"id": 123},
+            "from": {"id": 123, "username": "tester"},
+            "text": "/start",
+        })
+
+        method, payload = self.bot.api.await_args.args[:2]
+        files = self.bot.api.await_args.kwargs["files"]
+        self.assertEqual(method, "sendPhoto")
+        self.assertEqual(payload["chat_id"], 123)
+        self.assertIn("AI Hub", payload["caption"])
+        self.assertEqual(files["photo"][1], self.bot.banner)
+        buttons = [button["callback_data"]
+                   for row in json.loads(payload["reply_markup"])["inline_keyboard"]
+                   for button in row]
+        self.assertIn("models", buttons)
+        self.assertIn("profile", buttons)
+
+    async def test_callback_edits_caption_of_existing_banner(self):
+        await self.bot.dispatch_callback({
+            "id": "callback-1",
+            "data": "profile",
+            "from": {"id": 123, "username": "tester"},
+            "message": {"message_id": 42, "chat": {"id": 123},
+                        "photo": [{"file_id": "photo-id"}]},
+        })
+
+        methods = [call.args[0] for call in self.bot.api.await_args_list]
+        self.assertEqual(methods, ["answerCallbackQuery", "editMessageCaption"])
+        edit_payload = self.bot.api.await_args_list[1].args[1]
+        self.assertEqual(edit_payload["message_id"], 42)
+        self.assertIn("Профиль", edit_payload["caption"])
+        self.assertIn("reply_markup", edit_payload)
+
+    async def test_every_menu_screen_fits_telegram_photo_caption(self):
+        user = {"id": 123, "username": "tester"}
+        for action in ("start", "help", "models", "profile", "key",
+                       "reissue", "quota", "docs", "reset"):
+            with self.subTest(action=action):
+                text, _ = await self.bot.render_action(action, user)
+                self.assertLessEqual(len(text.encode("utf-16-le")) // 2, 1024)
+
+
+if __name__ == "__main__":
+    unittest.main()

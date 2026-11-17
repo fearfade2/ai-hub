@@ -1,0 +1,31 @@
+[Unit]
+Description=AI Hub Telegram aggregator and OpenAI-compatible gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/data/workspace/ai-hub
+Environment=HUB_HOST=0.0.0.0
+Environment=HUB_PORT=8791
+Environment=HUB_DATA_DIR=/data/workspace/ai-hub/data
+Environment=HUB_PUBLIC_URL=https://8791-agq2pkibmx77e7svypqdtkt2je.instabox.tech
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=SSL_CERT_FILE=/run/instabox/secrets/ca-bundle.pem
+EnvironmentFile=-/data/workspace/ai-hub/.env
+ExecStart=/data/workspace/ai-hub/.venv/bin/python -m uvicorn app.api:app \
+  --host 0.0.0.0 --port 8791 --log-level warning
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/workspace/ai-hub/data
+
+[Install]
+WantedBy=multi-user.target

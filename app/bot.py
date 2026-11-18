@@ -94,6 +94,8 @@ class Bot:
         ]
         if action in {"key", "reissue"} and self.store.active_key(user_row["telegram_id"]):
             rows.append([_btn("🔄 Перевыпустить ключ", "reissue")])
+        if action not in {"start", "help"}:
+            rows.append([_btn("⬅️ Назад в меню", "start")])
         return {"inline_keyboard": rows}
 
     # -- screens -----------------------------------------------------------------
@@ -301,13 +303,10 @@ class Bot:
         try:
             text, user_row = await self.render_action(action, user)
             keyboard = self.keyboard_for(action, user_row)
-            try:
-                await self.edit_screen(chat_id, message_id, text, keyboard)
-            except RuntimeError as error:
-                if "message is not modified" not in str(error).lower():
-                    await self.send_screen(chat_id, text, keyboard)
-        except (ConnectionError, RuntimeError) as error:
-            print("bot: menu callback failed:", error, flush=True)
+            await self.edit_screen(chat_id, message_id, text, keyboard)
+        except (ConnectionError, RuntimeError, ValueError) as error:
+            print("bot: menu callback failed; original message kept:", error,
+                  flush=True)
 
     async def dispatch(self, message: dict) -> None:
         chat_id = (message.get("chat") or {}).get("id")

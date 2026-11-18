@@ -1,7 +1,9 @@
 import asyncio
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -57,6 +59,29 @@ class BotBannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edit_payload["message_id"], 42)
         self.assertIn("Профиль", edit_payload["caption"])
         self.assertIn("reply_markup", edit_payload)
+
+    async def test_section_includes_back_to_menu_button(self):
+        user_row = self.store.ensure_user(123, "tester")
+        keyboard = self.bot.keyboard_for("profile", user_row)
+        callbacks = [button["callback_data"]
+                     for row in keyboard["inline_keyboard"] for button in row]
+        self.assertEqual(callbacks[-1], "start")
+
+    async def test_failed_edit_does_not_send_a_second_menu_message(self):
+        self.bot.api = AsyncMock(side_effect=[{"ok": True},
+                                               RuntimeError("edit failed")])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            await self.bot.dispatch_callback({
+                "id": "callback-2",
+                "data": "profile",
+                "from": {"id": 123, "username": "tester"},
+                "message": {"message_id": 42, "chat": {"id": 123},
+                            "photo": [{"file_id": "photo-id"}]},
+            })
+        methods = [call.args[0] for call in self.bot.api.await_args_list]
+        self.assertEqual(methods, ["answerCallbackQuery", "editMessageCaption"])
+        self.assertIn("original message kept", output.getvalue())
 
     async def test_every_menu_screen_fits_telegram_photo_caption(self):
         user = {"id": 123, "username": "tester"}

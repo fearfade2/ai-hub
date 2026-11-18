@@ -62,13 +62,9 @@ class Bot:
                               files={"photo": (config.BANNER_FILE.name,
                                                self.banner, "image/png")})
 
-    async def edit_screen(self, chat_id: int, message_id: int, text: str,
-                          keyboard: dict | None = None):
-        payload = {"chat_id": chat_id, "message_id": message_id,
-                   "caption": self._caption(text), "parse_mode": "HTML"}
-        if keyboard:
-            payload["reply_markup"] = keyboard
-        return await self.api("editMessageCaption", payload)
+    async def delete_screen(self, chat_id: int, message_id: int):
+        return await self.api("deleteMessage", {
+            "chat_id": chat_id, "message_id": message_id})
 
     async def send(self, chat_id: int, text: str,
                    keyboard: dict | None = None):
@@ -303,7 +299,12 @@ class Bot:
         try:
             text, user_row = await self.render_action(action, user)
             keyboard = self.keyboard_for(action, user_row)
-            await self.edit_screen(chat_id, message_id, text, keyboard)
+            await self.send_screen(chat_id, text, keyboard)
+            try:
+                await self.delete_screen(chat_id, message_id)
+            except (ConnectionError, RuntimeError) as error:
+                print("bot: new section sent but old menu could not be deleted:",
+                      error, flush=True)
         except (ConnectionError, RuntimeError, ValueError) as error:
             print("bot: menu callback failed; original message kept:", error,
                   flush=True)

@@ -54,7 +54,7 @@ class StoreTests(unittest.TestCase):
     def test_key_issue_verify_revoke(self):
         self.store.ensure_user(10, "alice")
         secret, prefix = self.store.issue_key(10, "laptop")
-        self.assertTrue(secret.startswith("hub_"))
+        self.assertRegex(secret, r"^sk-[A-Za-z0-9_-]+$")
         row = self.store.verify_key(secret)
         self.assertIsNotNone(row)
         self.assertEqual(row["telegram_id"], 10)
@@ -77,7 +77,7 @@ class StoreTests(unittest.TestCase):
         self.assertAlmostEqual(totals["usd"], 0.011, places=6)
 
     def test_bad_key_rejected(self):
-        self.assertIsNone(self.store.verify_key("hub_nope"))
+        self.assertIsNone(self.store.verify_key("sk-invalid"))
         self.assertIsNone(self.store.verify_key(""))
 
     def test_hash_key_stable(self):

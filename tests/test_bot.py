@@ -36,7 +36,6 @@ class BotBannerTests(unittest.IsolatedAsyncioTestCase):
         files = self.bot.api.await_args.kwargs["files"]
         self.assertEqual(method, "sendPhoto")
         self.assertEqual(payload["chat_id"], 123)
-        self.assertIn("AI Hub", payload["caption"])
         self.assertEqual(files["photo"][1], self.bot.banner)
         buttons = [button["callback_data"]
                    for row in json.loads(payload["reply_markup"])["inline_keyboard"]

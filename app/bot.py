@@ -83,43 +83,49 @@ class Bot:
 
     # -- keyboards -------------------------------------------------------------
     def keyboard_for(self, action: str, user_row) -> dict:
-        rows = [
-            [_btn("🤖 Модели", "models"), _btn("👤 Профиль", "profile")],
-            [_btn("🔑 API-ключ", "key"), _btn("📊 Использование", "quota")],
-            [_btn("📚 Как подключить", "docs"), _btn("ℹ️ Помощь", "help")],
-        ]
-        if action in {"key", "reissue"} and self.store.active_key(user_row["telegram_id"]):
-            rows.append([_btn("🔄 Перевыпустить ключ", "reissue")])
-        if action not in {"start", "help"}:
-            rows.append([_btn("⬅️ Назад в меню", "start")])
+        if action == "start":
+            rows = [
+                [_btn("Каталог моделей", "models")],
+                [_btn("Профиль", "profile"), _btn("Использование", "quota")],
+                [_btn("API-ключ", "key"), _btn("Подключение", "docs")],
+                [_btn("Помощь", "help")],
+            ]
+        else:
+            rows = []
+            if action in {"key", "reissue"} and self.store.active_key(user_row["telegram_id"]):
+                rows.append([_btn("Перевыпустить ключ", "reissue")])
+            rows.append([_btn("Назад в меню", "start")])
         return {"inline_keyboard": rows}
 
     # -- screens -----------------------------------------------------------------
     async def start_text(self) -> str:
         base = html.escape(config.upstream_public())
-        return ("🤖 <b>AI Hub</b> — доступ к моделям в Telegram и по API.\n\n"
-                "Выбери раздел кнопками ниже, или просто напиши сообщение — "
-                "отвечу выбранной моделью.\n\n"
-                f"🌐 API: <code>{base}/v1</code>\n"
-                "📖 Совместим с OpenAI (chat/completions, models).")
+        return ("<b>VibeComAI</b>\n\n"
+                "Каталог моделей, лимиты и ключ для подключения к API.\n\n"
+                f"Адрес API\n<code>{base}/v1</code>")
 
     async def models_text(self, user_row) -> str:
         models = await self.upstream.models()
+        title = "<b>Каталог моделей</b>\n"
         if not models:
-            return ("⚠️ Список моделей недоступен.\n"
-                    "Попробуй позже или выбери модель командой /model &lt;имя&gt;.")
+            return f"{title}\nНе удалось загрузить список моделей. Попробуйте позже."
         current = user_row["chat_model"]
-        names = [model["id"] for model in models][:48]
-        lines = ["🤖 <b>Доступные модели</b>\n"]
-        for name in names:
-            line = f"{'✅ ' if name == current else '• '}<code>{html.escape(name)}</code>"
-            if len(("\n".join((*lines, line)) + "\n\nВыбрать: /model &lt;имя&gt;").encode("utf-16-le")) // 2 > 900:
+        hint = "\nВыбор модели: <code>/model имя-модели</code>"
+        lines = [title]
+        size = len(title) + len(hint) + 1
+        for model in models:
+            name = model["id"]
+            line = f"<code>{html.escape(name)}</code>"
+            if name == current:
+                line += " (выбрана)"
+            size += len(line.encode("utf-16-le")) // 2 + 1
+            if size > 900:
                 break
             lines.append(line)
         shown = len(lines) - 1
-        if shown < len(names):
-            lines.append(f"\nПоказано {shown} из {len(names)}. Полный список: /v1/models")
-        lines.append("\nВыбрать: /model &lt;имя&gt;")
+        if shown < len(models):
+            lines.append(f"\nПоказано {shown} из {len(models)}. Полный список: <code>/v1/models</code>.")
+        lines.append(hint)
         return "\n".join(lines)
 
     def profile_text(self, user_row) -> str:
@@ -127,14 +133,13 @@ class Bot:
         requests, usd = self._today_pair(key["id"]) if key else (0, 0.0)
         username = user_row["username"]
         lines = [
-            "👤 <b>Профиль</b>\n",
-            f"🔁 Имя: @{html.escape(username)}" if username else None,
-            f"🆔 ID: <code>{user_row['telegram_id']}</code>",
-            f"💠 Тир: <b>Free</b>",
-            f"💰 Дневной лимит: ${user_row['daily_usd']:.2f} / "
-            f"{user_row['daily_requests']} запросов\n",
-            f"Сегодня: {requests} запросов, ${usd:.4f}",
-            f"⏳ Сброс через {self._reset_text()}",
+            "<b>Профиль</b>\n",
+            f"@{html.escape(username)}" if username else None,
+            f"Telegram ID: <code>{user_row['telegram_id']}</code>",
+            "Тариф: Free\n",
+            f"Сегодня: {requests} запросов / ${usd:.4f}",
+            f"Лимит на день: {user_row['daily_requests']} запросов / ${user_row['daily_usd']:.2f}",
+            f"Обновление лимита через {self._reset_text()}",
         ]
         return "\n".join([line for line in lines if line])
 
@@ -144,9 +149,9 @@ class Bot:
             totals = self.store.today_totals(key["id"])
             top = self.store.today_by_model(key["id"], limit=3)
             lines = [
-                "📊 <b>Использование</b>\n",
-                f"Запросов: {totals['requests']} из {user_row['daily_requests']}",
-                f"Потрачено: ${totals['usd']:.4f} из ${user_row['daily_usd']:.2f}",
+                "<b>Использование</b>\n",
+                f"Запросы: {totals['requests']} из {user_row['daily_requests']}",
+                f"Расход: ${totals['usd']:.4f} из ${user_row['daily_usd']:.2f}",
                 "Токенов: вход {:,} · выход {:,}".format(
                     totals["pt"], totals["ct"]).replace(",", " "),
             ]
@@ -154,55 +159,49 @@ class Bot:
                 f"<code>{html.escape(item['model'][:80])}</code> (${item['usd']:.4f})"
                 for item in top if item["usd"] > 0)
             if joined:
-                lines.append(f"Топ моделей: {joined}")
+                lines.append(f"\nМодели по расходу: {joined}")
         else:
-            lines = ["📊 <b>Использование</b>\n",
-                     "Ключ ещё не создан — раздел 🔑 API-ключ."]
-        lines.append(f"⏳ Лимит обновится через {self._reset_text()}")
+            lines = ["<b>Использование</b>\n", "Ключ ещё не выпущен."]
+        lines.append(f"\nОбновление лимита через {self._reset_text()}")
         return "\n".join(line for line in lines if line is not None)
 
     def key_text(self, user_row) -> str:
         existing = self.store.active_key(user_row["telegram_id"])
         if not existing:
-            secret, prefix = self.store.issue_key(
-                user_row["telegram_id"], "telegram")
-            return self._key_issued_text(secret, prefix)
-        return ("🔑 <b>API-ключ</b>\n\n"
-                f"Активен ключ <code>{html.escape(existing['prefix'])}…</code>\n\n"
-                "Показ повторно невозможен: ключ хранится только хешем.\n"
-                "Нужен новый — нажми «Перевыпустить» ниже.")
+            secret, _ = self.store.issue_key(user_row["telegram_id"], "telegram")
+            return self._key_issued_text(secret)
+        return ("<b>API-ключ</b>\n\n"
+                f"Активный ключ: <code>{html.escape(existing['prefix'])}…</code>\n\n"
+                "Полный ключ показывается только при выпуске. "
+                "При перевыпуске текущий ключ перестанет работать.")
 
     def reissue_text(self, user_row) -> str:
         existing = self.store.active_key(user_row["telegram_id"])
         if existing:
             self.store.revoke_by_prefix(existing["prefix"])
-        secret, prefix = self.store.issue_key(user_row["telegram_id"], "reissue")
-        return self._key_issued_text(secret, prefix)
+        secret, _ = self.store.issue_key(user_row["telegram_id"], "reissue")
+        return self._key_issued_text(secret)
 
-    def _key_issued_text(self, secret: str, prefix: str) -> str:
+    def _key_issued_text(self, secret: str) -> str:
         base = html.escape(config.upstream_public())
-        return ("🔑 <b>Ваш API-ключ</b> (префикс "
-                f"<code>{html.escape(prefix)}…</code>)\n\n"
+        return ("<b>Новый API-ключ</b>\n\n"
                 f"<code>{html.escape(secret)}</code>\n\n"
-                "⚠️ Сохрани сейчас: показываю один раз, хранится хеш.\n\n"
-                f"🌐 Эндпоинт: <code>{base}/v1</code>\n"
+                "Скопируйте ключ: повторно он не показывается.\n\n"
+                f"Адрес API\n<code>{base}/v1</code>\n\n"
                 "Заголовок: <code>Authorization: Bearer &lt;ключ&gt;</code>")
 
     def docs_text(self) -> str:
         base = html.escape(config.upstream_public())
-        return ("📚 <b>Как подключить</b>\n\n"
-                "1. Выпусти ключ: раздел 🔑 API-ключ.\n"
-                f"2. Base URL: <code>{base}/v1</code>\n"
-                "3. Заголовок: <code>Authorization: Bearer &lt;ключ&gt;</code>\n"
-                "4. Эндпоинты: <code>POST /chat/completions</code>, <code>GET /models</code>\n\n"
-                "Пример:\n"
-                f"curl {base}/v1/chat/completions -H \"Authorization: Bearer hub_...\" "
-                "-d '{\"model\": \"glm-5.3-flash\", \"messages\": [{\"role\": \"user\", "
-                "\"content\": \"привет\"}]}'\n\n"
-                "Работает с OpenAI SDK, Cursor, Claude Code.")
+        return ("<b>Подключение</b>\n\n"
+                "В OpenAI-совместимом клиенте укажите Base URL и ключ из раздела «API-ключ».\n\n"
+                f"Base URL\n<code>{base}/v1</code>\n\n"
+                "Проверка подключения\n"
+                f"<pre>curl {base}/v1/models \\\n"
+                "  -H 'Authorization: Bearer sk-...'</pre>\n\n"
+                "Для чата: <code>POST /chat/completions</code>.")
 
     def reset_text(self) -> str:
-        return f"⏳ Лимит обновится через {self._reset_text()}."
+        return f"Лимит обновится через {self._reset_text()}."
 
     def _reset_text(self) -> str:
         seconds = self.store.reset_in_seconds()
@@ -222,7 +221,7 @@ class Bot:
         if not model:
             models = await self.upstream.models()
             if not models:
-                await self.send(chat_id, "⚠️ Апстрим недоступен, попробуй позже.")
+                await self.send(chat_id, "Список моделей недоступен. Попробуйте позже.")
                 return
             model = models[0]["id"]
             self.store.set_chat_model(user["id"], model)
@@ -233,12 +232,10 @@ class Bot:
             key = self.store.active_key(user["id"])
         totals = self.store.today_totals(key["id"])
         if totals["requests"] >= record["daily_requests"]:
-            await self.send(chat_id, "🚫 Дневной лимит запросов исчерпан. "
-                            + self.reset_text())
+            await self.send(chat_id, "Дневной лимит запросов исчерпан. " + self.reset_text())
             return
         if record["daily_usd"] > 0 and totals["usd"] >= record["daily_usd"]:
-            await self.send(chat_id, "🚫 Дневной лимит стоимости исчерпан. "
-                            + self.reset_text())
+            await self.send(chat_id, "Дневной лимит расходов исчерпан. " + self.reset_text())
             return
 
         await self.api("sendChatAction", {"chat_id": chat_id, "action": "typing"})
@@ -248,7 +245,7 @@ class Bot:
                 max_tokens=config.MAX_OUTPUT_TOKENS)
             data = response.json()
         except UpstreamError as error:
-            await self.send(chat_id, f"⚠️ Апстрим: {html.escape(str(error))}")
+            await self.send(chat_id, html.escape(str(error)))
             return
         choices = data.get("choices") or [{}]
         answer = (choices[0].get("message") or {}).get("content") or "…"
@@ -267,8 +264,14 @@ class Bot:
         user_row = self.store.ensure_user(
             user["id"], user.get("username", ""),
             is_admin=user.get("id") == config.OWNER_TELEGRAM_ID)
-        if action in ("start", "help"):
+        if action == "start":
             text = await self.start_text()
+        elif action == "help":
+            text = ("<b>Помощь</b>\n\n"
+                    "<code>/models</code> — каталог моделей\n"
+                    "<code>/model имя-модели</code> — выбрать модель\n"
+                    "<code>/key</code> — открыть раздел API-ключа\n"
+                    "<code>/usage</code> — посмотреть расход и лимиты")
         elif action == "models":
             text = await self.models_text(user_row)
         elif action == "profile":
@@ -282,7 +285,7 @@ class Bot:
         elif action == "docs":
             text = self.docs_text()
         elif action == "reset":
-            text = self.reset_text()
+            text = f"<b>Дневной лимит</b>\n\n{self.reset_text()}"
         else:
             text = await self.start_text()
         return text, user_row
@@ -327,7 +330,7 @@ class Bot:
                     self.store.set_chat_model(user["id"], argument)
                     await self.send_screen(
                         chat_id,
-                        f"✅ Модель чата: <code>{html.escape(argument[:80])}</code>",
+                        f"Модель чата: <code>{html.escape(argument[:80])}</code>",
                         self.keyboard_for("start", user_row))
                 else:
                     await self.send_screen(
@@ -342,7 +345,7 @@ class Bot:
                 if existing:
                     self.store.revoke_by_prefix(existing["prefix"])
                     await self.send_screen(chat_id,
-                                           "🗑 Ключ отозван. Новый — раздел 🔑 API-ключ.",
+                                           "Ключ отозван. Выпустите новый в разделе «API-ключ».",
                                            self.keyboard_for("start", user_row))
                 else:
                     await self.send_screen(chat_id, "Активного ключа нет.",
@@ -359,14 +362,14 @@ class Bot:
             elif command:
                 user_row = self.store.ensure_user(
                     user["id"], user.get("username", ""))
-                await self.send_screen(chat_id, "🤷 Неизвестная команда. Меню ниже:",
+                await self.send_screen(chat_id, "Неизвестная команда. Выберите раздел в меню.",
                                        self.keyboard_for("start", user_row))
             else:
                 await self.handle_message(chat_id, user, text)
         except (ConnectionError, RuntimeError) as error:
             print("bot: dispatch failed:", error, flush=True)
             try:
-                await self.send(chat_id, f"⚠️ Ошибка: {type(error).__name__}")
+                await self.send(chat_id, "Не удалось обработать запрос. Попробуйте ещё раз.")
             except (ConnectionError, RuntimeError):
                 pass
 

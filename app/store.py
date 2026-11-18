@@ -124,7 +124,7 @@ class Store:
 
     # -- keys ------------------------------------------------------------
     def issue_key(self, telegram_id: int, name: str = "") -> tuple[str, str]:
-        secret = "hub_" + secrets.token_urlsafe(32)
+        secret = "sk-" + secrets.token_urlsafe(32)
         prefix = secret[:12]
         with self.lock:
             self.db.execute(
